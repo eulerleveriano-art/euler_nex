@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin de productos</title>
+<style>
+:root{--bg:#eef1f4;--panel:#fff;--ink:#1b2430;--mute:#6a7686;--line:#d6dce3;--acc:#1f5f8b;--bad:#b3261e;--ok:#1d7a4a;--btn:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#141a21;--panel:#1d252e;--ink:#e8edf2;--mute:#93a0af;--line:#33404d;--acc:#6db3e0;--bad:#f08a82;--ok:#6fd1a0;--btn:#0d1217}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+header{padding:14px 24px;background:var(--panel);border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0;font-weight:650}
+main{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:20px;padding:20px 24px;max-width:1200px;margin:auto}
+@media(max-width:820px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:18px}
+h2{font-size:15px;margin:0 0 14px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 3px}
+input,textarea,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);font:inherit}
+input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+textarea{min-height:90px;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:inherit;padding:9px 14px;border-radius:4px;border:1px solid var(--acc);background:var(--acc);color:var(--btn);cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+button.sec{background:transparent;color:var(--acc)}
+button.del{background:transparent;color:var(--bad);border-color:var(--bad)}
+.actions{display:flex;gap:8px;margin-top:16px}
+#preview{margin-top:10px;display:none}
+#preview img{width:100%;max-height:220px;object-fit:contain;border:1px solid var(--line);border-radius:4px;background:var(--bg)}
+#preview p{margin:4px 0 0;font-size:12px;color:var(--mute)}
+.msg{margin-top:12px;font-size:13px;white-space:pre-line}
+.err{color:var(--bad)}.ok{color:var(--ok)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:13px;color:var(--mute);font-weight:600}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+.thumb{width:48px;height:48px;object-fit:cover;border-radius:4px;border:1px solid var(--line);background:var(--bg)}
+.pn{display:flex;gap:10px;align-items:center}
+.slug{font-size:12px;color:var(--mute);word-break:break-all}
+td.act{white-space:nowrap}
+</style>
+</head>
+<body>
+<header><h1>Productos</h1></header>
+<main>
+  <section class="card">
+    <h2 id="formTitle">Nuevo producto</h2>
+    <label for="name">Nombre del producto</label><input id="name">
+    <label for="url">Código URL</label><input id="url" placeholder="https://… (enlace o imagen del producto)">
+    <div id="preview"><img id="pimg" alt="Vista previa del producto"><p id="pnote"></p></div>
+    <label for="category">Categoría</label>
+    <select id="category">
+      <option value="libros">Libros</option><option value="ropa">Ropa</option><option value="joyeria">Joyería</option>
+      <option value="juguetes">Juguetes</option><option value="tecnologia">Tecnología</option><option value="otros">Otros</option>
+    </select>
+    <div class="row">
+      <div><label for="quantity">Cantidad</label><input id="quantity" type="number" min="0" value="0"></div>
+      <div><label for="price">Precio</label><input id="price" type="number" min="0" step="0.01" value="0"></div>
+    </div>
+    <label for="available">Unidades disponibles</label><input id="available" type="number" min="0" value="0">
+    <label for="description">Descripción</label><textarea id="description"></textarea>
+    <div class="actions"><button id="btnSave">Publicar producto</button><button class="sec" id="btnCancel" hidden>Cancelar</button></div>
+    <div id="msg" class="msg" role="status"></div>
+  </section>
+
+  <section class="card">
+    <h2>Productos publicados (<span id="count">0</span>)</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Disp.</th><th></th></tr></thead>
+      <tbody id="list"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyBs-FOztqyjUuTLGCZtRAl8Er-SbrKijI0",
+  authDomain: "euler-nex-2.firebaseapp.com",
+  projectId: "euler-nex-2",
+  storageBucket: "euler-nex-2.firebasestorage.app",
+  messagingSenderId: "548902852740",
+  appId: "1:548902852740:web:a914c0fac5cb0e08a04ad1"
+});
+const db = getFirestore(app), col = collection(db, "products");
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const isUrl = s => /^https?:\/\/\S+$/i.test(s);
+const money = n => Number(n || 0).toLocaleString("es", {minimumFractionDigits:2, maximumFractionDigits:2});
+let editing = null, items = [];
+
+const RULES_HELP = "Firestore está bloqueando la escritura (permission-denied).\nEn la consola de Firebase ve a Firestore Database → Reglas, pega las reglas indicadas y pulsa Publicar.";
+const say = (t, cls="") => { $("msg").textContent = t; $("msg").className = "msg " + cls; };
+const fail = (er, accion) => say(er.code === "permission-denied" ? RULES_HELP : `No se pudo ${accion}: ${er.code || er.message}`, "err");
+
+// Vista previa debajo del Código URL
+function preview(){
+  const v = $("url").value.trim(), box = $("preview"), img = $("pimg");
+  if (!isUrl(v)) { box.style.display = "none"; return; }
+  box.style.display = "block"; $("pnote").textContent = "Cargando vista previa…";
+  img.onload = () => $("pnote").textContent = "Así se verá el producto.";
+  img.onerror = () => { box.style.display = "none"; };
+  img.src = v;
+}
+$("url").addEventListener("input", preview);
+
+onSnapshot(col, snap => {
+  items = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+  render();
+}, er => fail(er, "leer los productos"));
+
+function render(){
+  $("count").textContent = items.length;
+  $("list").innerHTML = items.length ? items.map(p => `
+    <tr>
+      <td><div class="pn">${isUrl(p.url||"") ? `<img class="thumb" src="${esc(p.url)}" alt="" onerror="this.style.display='none'">` : ""}
+        <div><strong>${esc(p.name)}</strong><br><span class="slug">${esc(p.category || "otros")}</span></div></div></td>
+      <td class="n">${p.quantity ?? 0}</td><td class="n">${money(p.price)}</td><td class="n">${p.available ?? 0}</td>
+      <td class="act"><button class="sec" data-e="${esc(p.id)}">Editar</button> <button class="del" data-d="${esc(p.id)}">Eliminar</button></td>
+    </tr>`).join("")
+    : `<tr><td colspan="5">Aún no hay productos. Completa el formulario para publicar el primero.</td></tr>`;
+}
+
+$("list").onclick = async e => {
+  const ed = e.target.dataset.e, dl = e.target.dataset.d;
+  if (ed) {
+    const p = items.find(x => x.id === ed); editing = ed;
+    $("name").value = p.name || ""; $("category").value = p.category || "otros"; $("url").value = p.url || "";
+    $("quantity").value = p.quantity ?? 0; $("price").value = p.price ?? 0;
+    $("available").value = p.available ?? 0; $("description").value = p.description || "";
+    $("formTitle").textContent = "Editar producto"; $("btnSave").textContent = "Guardar cambios";
+    $("btnCancel").hidden = false; say(""); preview(); scrollTo({top:0, behavior:"smooth"});
+  }
+  if (dl && confirm("¿Eliminar este producto? No se puede deshacer.")) {
+    try { await deleteDoc(doc(db, "products", dl)); say("Producto eliminado.", "ok"); }
+    catch (er) { fail(er, "eliminar"); }
+  }
+};
+
+function reset(){
+  editing = null;
+  ["name","url","description"].forEach(i => $(i).value = "");
+  ["quantity","price","available"].forEach(i => $(i).value = 0); $("category").value = "libros";
+  $("formTitle").textContent = "Nuevo producto"; $("btnSave").textContent = "Publicar producto";
+  $("btnCancel").hidden = true; preview();
+}
+$("btnCancel").onclick = () => { reset(); say(""); };
+
+$("btnSave").onclick = async () => {
+  const name = $("name").value.trim();
+  if (!name) return say("Escribe el nombre del producto.", "err");
+  const data = {
+    name, category: $("category").value, url: $("url").value.trim(), description: $("description").value.trim(),
+    quantity: Math.max(0, Math.floor(+$("quantity").value || 0)),
+    price: Math.max(0, +$("price").value || 0),
+    available: Math.max(0, Math.floor(+$("available").value || 0)),
+    updatedAt: serverTimestamp()
+  };
+  const btn = $("btnSave"); btn.disabled = true; say("Guardando…");
+  try {
+    if (editing) { await updateDoc(doc(db, "products", editing), data); say("Cambios guardados.", "ok"); }
+    else { data.createdAt = serverTimestamp(); await addDoc(col, data); say("Producto publicado. Puedes modificarlo con el botón Editar de la lista.", "ok"); }
+    reset();
+  } catch (er) { fail(er, "guardar"); }
+  finally { btn.disabled = false; }
+};
+</script>
+</body>
+</html>
